@@ -483,7 +483,7 @@ const SB=(CONFIG.SUPABASE_URL&&CONFIG.SUPABASE_ANON_KEY&&window.supabase)
 const ONLINE=!!SB;
 
 /* Campi del lead che vivono su Supabase (gli altri restano locali) */
-const LEAD_FIELDS=['full_name','phone','email','city','vehicle','service','source','campaign','status','value','notes'];
+const LEAD_FIELDS=['full_name','phone','email','city','vehicle','service','source','campaign','status','value','notes','fb_answers'];
 const cleanLead=f=>{const o={};LEAD_FIELDS.forEach(k=>{if(f[k]!==undefined)o[k]=f[k]});return o};
 
 /* ============================================================
@@ -1017,6 +1017,18 @@ const LeadDetail=({lead,activities,campaigns,onClose,onEdit,onDelete,onStatusCha
           </div>
         </div>
 
+        {Array.isArray(lead.fb_answers)&&lead.fb_answers.length>0&&(
+          <div style={{background:'var(--surface-2)',borderRadius:10,padding:'6px 16px',marginBottom:16,border:'1px solid var(--line)'}}>
+            <div style={{fontSize:9.5,fontWeight:800,color:'var(--tx-3)',textTransform:'uppercase',letterSpacing:'.08em',padding:'9px 0 3px'}}>Risposte dal modulo</div>
+            {lead.fb_answers.map((qa,i)=>(
+              <div key={i} style={{padding:'8px 0',borderTop:'1px solid var(--line)'}}>
+                <div style={{fontSize:11,color:'var(--tx-3)',fontWeight:600}}>{qa.q||qa.question||qa.name||'\u2014'}</div>
+                <div style={{fontSize:13,color:'var(--tx)',fontWeight:700,marginTop:2}}>{qa.a||qa.answer||qa.value||'\u2014'}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="qa">
           <div className="qa-b wa" onClick={()=>setTplOpen(true)}><I n="whatsapp"/>WhatsApp</div>
           <div className="qa-b" onClick={doCall}><I n="phone"/>Chiama</div>
@@ -1239,6 +1251,7 @@ const App=()=>{
     if(!ONLINE||!session)return;
     let mounted=true;
     repo.list().then(rows=>{if(mounted&&rows)setData(d=>({...d,leads:rows}))});
+    SB.from('activities').select('*').order('created_at',{ascending:false}).then(({data:acts})=>{if(mounted&&acts)setData(d=>({...d,activities:acts}))});
     const ch=SB.channel('giamacar-leads')
       .on('postgres_changes',{event:'INSERT',schema:'public',table:CONFIG.TABLE},p=>{
         const row=p.new;setData(d=>d.leads.some(l=>l.id===row.id)?d:{...d,leads:[row,...d.leads]});notifyNew(row);
@@ -1248,6 +1261,12 @@ const App=()=>{
       })
       .on('postgres_changes',{event:'DELETE',schema:'public',table:CONFIG.TABLE},p=>{
         const id=p.old.id;setData(d=>({...d,leads:d.leads.filter(l=>l.id!==id)}));
+      })
+      .on('postgres_changes',{event:'INSERT',schema:'public',table:'activities'},p=>{
+        const row=p.new;setData(d=>d.activities.some(a=>a.id===row.id)?d:{...d,activities:[row,...d.activities]});
+      })
+      .on('postgres_changes',{event:'DELETE',schema:'public',table:'activities'},p=>{
+        const id=p.old.id;setData(d=>({...d,activities:d.activities.filter(a=>a.id!==id)}));
       })
       .subscribe();
     return()=>{mounted=false;try{SB.removeChannel(ch)}catch(e){}};
@@ -1279,14 +1298,18 @@ const App=()=>{
     setSelected(null);showToast('Lead eliminato');
   };
   const changeStatus=(id,status)=>{
-    setData(d=>({...d,
-      leads:d.leads.map(l=>l.id===id?{...l,status}:l),
-      activities:[{id:uid(),lead_id:id,type:'status',content:'Stato \u2192 '+(STATUS_MAP[status]?.l||status),created_at:new Date().toISOString()},...d.activities]
-    }));
+    setData(d=>({...d,leads:d.leads.map(l=>l.id===id?{...l,status}:l)}));
     if(ONLINE)repo.update(id,{status});
+    addActivity({lead_id:id,type:'status',content:'Stato \u2192 '+(STATUS_MAP[status]?.l||status)});
     if(selected?.id===id)setSelected(s=>({...s,status}));
   };
-  const addActivity=act=>setData(d=>({...d,activities:[{...act,id:uid(),created_at:new Date().toISOString()},...d.activities]}));
+  const addActivity=async act=>{
+    if(ONLINE){
+      const {data:row}=await SB.from('activities').insert({lead_id:act.lead_id,type:act.type,content:act.content}).select().single();
+      if(row){setData(d=>d.activities.some(a=>a.id===row.id)?d:{...d,activities:[row,...d.activities]});return}
+    }
+    setData(d=>({...d,activities:[{...act,id:uid(),created_at:new Date().toISOString()},...d.activities]}));
+  };
 
   /* Azioni rapide (spotlight + lista): registrano l'attivit\u00E0 */
   const quickWA=l=>addActivity({lead_id:l.id,type:'whatsapp',content:'WhatsApp inviato (primo contatto)'});
