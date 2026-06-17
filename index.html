@@ -516,8 +516,16 @@ const repo={
     if(error){console.warn('Supabase insert',error);return null}
     return data;
   },
-  update(id,f){return SB.from(CONFIG.TABLE).update(cleanLead(f)).eq('id',id)},
-  remove(id){return SB.from(CONFIG.TABLE).delete().eq('id',id)}
+  async update(id,f){
+    const {error}=await SB.from(CONFIG.TABLE).update(cleanLead(f)).eq('id',id);
+    if(error)console.warn('Supabase update',error);
+    return !error;
+  },
+  async remove(id){
+    const {error}=await SB.from(CONFIG.TABLE).delete().eq('id',id);
+    if(error)console.warn('Supabase delete',error);
+    return !error;
+  }
 };
 
 /* Suono breve per nuovo lead */
@@ -1292,9 +1300,12 @@ const App=()=>{
     const nl={...f,id:uid(),created_at:new Date().toISOString()};
     setData(d=>({...d,leads:[nl,...d.leads]}));showToast('Lead creato');
   };
-  const deleteLead=id=>{
+  const deleteLead=async id=>{
+    if(ONLINE){
+      const ok=await repo.remove(id);
+      if(!ok){showToast('Errore: lead non eliminato');return;}
+    }
     setData(d=>({...d,leads:d.leads.filter(l=>l.id!==id),activities:d.activities.filter(a=>a.lead_id!==id)}));
-    if(ONLINE)repo.remove(id);
     setSelected(null);showToast('Lead eliminato');
   };
   const changeStatus=(id,status)=>{
